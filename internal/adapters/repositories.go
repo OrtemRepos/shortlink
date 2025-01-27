@@ -1,6 +1,7 @@
 package adapters
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"os"
@@ -37,11 +38,11 @@ func NewInMemoryURLRepository(savePath string) (*InMemoryURLRepository, error) {
 	return repo, nil
 }
 
-func (r *InMemoryURLRepository) Ping() error {
+func (r *InMemoryURLRepository) Ping(ctx context.Context) error {
 	return nil
 }
 
-func (r *InMemoryURLRepository) Save(url *domain.URL) error {
+func (r *InMemoryURLRepository) Save(ctx context.Context, url *domain.URL) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if shortURL, ok := r.longURLExists(url.LongURL); ok {
@@ -52,7 +53,7 @@ func (r *InMemoryURLRepository) Save(url *domain.URL) error {
 	r.m[url.ShortURL] = url.LongURL
 	return r.saveToFile()
 }
-func (r *InMemoryURLRepository) BatchSave(urls []*domain.URL) error {
+func (r *InMemoryURLRepository) BatchSave(ctx context.Context, urls []*domain.URL) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, url := range urls {
@@ -66,7 +67,11 @@ func (r *InMemoryURLRepository) BatchSave(urls []*domain.URL) error {
 	return r.saveToFile()
 }
 
-func (r *InMemoryURLRepository) Find(shortURL string) (*domain.URL, error) {
+func (r *InMemoryURLRepository) BatchDelete(ctx context.Context, ids map[string][]string) error {
+	return nil
+}
+
+func (r *InMemoryURLRepository) Find(ctx context.Context, shortURL string) (*domain.URL, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	longURL, ok := r.m[shortURL]

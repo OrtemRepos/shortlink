@@ -2,6 +2,7 @@ package adapters_test
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"log"
 	"net/http"
@@ -15,58 +16,6 @@ import (
 	"github.com/OrtemRepos/shortlink/internal/adapters"
 	"github.com/OrtemRepos/shortlink/internal/domain"
 )
-
-type MockURLRepository struct {
-	urls map[string]domain.URL
-}
-
-func NewMockURLRepository() *MockURLRepository {
-	return &MockURLRepository{
-		urls: make(map[string]domain.URL),
-	}
-}
-
-func (m *MockURLRepository) Ping() error {
-	return nil
-}
-
-func (m *MockURLRepository) Save(url *domain.URL) error {
-	if shortURL, exist := m.longURLExists(url); exist {
-		url.ShortURL = shortURL
-		return domain.ErrURLAlreadyExists
-	}
-	url.GenerateShortURL()
-	m.urls[url.ShortURL] = *url
-	return nil
-}
-
-func (m *MockURLRepository) BatchSave(urls []*domain.URL) error {
-	return nil
-}
-
-func (m *MockURLRepository) Close() error {
-	return nil
-}
-
-func (m *MockURLRepository) longURLExists(url *domain.URL) (shortlink string, exist bool) {
-	if len(m.urls) == 0 {
-		return shortlink, exist
-	}
-	for k, v := range m.urls {
-		if v.LongURL == url.LongURL {
-			return k, true
-		}
-	}
-	return "", false
-}
-
-func (m *MockURLRepository) Find(shortURL string) (*domain.URL, error) {
-	url, ok := m.urls[shortURL]
-	if !ok {
-		return nil, domain.ErrURLNotFound
-	}
-	return &url, nil
-}
 
 func setupRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
@@ -100,8 +49,10 @@ func TestGetLongURL(t *testing.T) {
 		},
 	}
 
-	repo := NewMockURLRepository()
-	repo.urls["shortURL"] = domain.URL{LongURL: "http://example.com", ShortURL: "shortURL"}
+	repo, err := adapters.NewInMemoryURLRepository("./testdata/data.json")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -115,7 +66,7 @@ func TestGetLongURL(t *testing.T) {
 			router.GET("/:shortURL", api.GetLongURL)
 
 			url := domain.NewURL("http://example.com")
-			_ = repo.Save(url)
+			_ = repo.Save(context.TODO(), url)
 
 			w := httptest.NewRecorder()
 			req, _ := http.NewRequest("GET", "/"+tt.shortURL, nil)
@@ -161,7 +112,10 @@ func TestJSONShortURL(t *testing.T) {
 		},
 	}
 
-	repo := NewMockURLRepository()
+	repo, err := adapters.NewInMemoryURLRepository("./testdata/data.json")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

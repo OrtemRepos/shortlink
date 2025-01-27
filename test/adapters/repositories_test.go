@@ -1,6 +1,7 @@
 package adapters_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/OrtemRepos/shortlink/internal/adapters"
@@ -25,13 +26,13 @@ func TestCreateRepository(t *testing.T) {
 func TestSave(t *testing.T) {
 	repo := getRepository()
 	url := domain.NewURL("https://github.com")
-	err := repo.Save(url)
+	err := repo.Save(context.TODO(), url)
 	if err != domain.ErrURLAlreadyExists && err != nil {
 		t.Errorf("Expected %v, got %v", nil, err)
 	}
 
 	repo = getRepository()
-	if findURL, err := repo.Find(url.ShortURL); err != nil {
+	if findURL, err := repo.Find(context.TODO(), url.ShortURL); err != nil {
 		t.Errorf("Expected %v, got %v", nil, err)
 	} else if findURL.LongURL != url.LongURL {
 		t.Errorf("Expected %s, got %s", url.LongURL, findURL.LongURL)
@@ -41,7 +42,7 @@ func TestSave(t *testing.T) {
 func TestSaveAlredyExist(t *testing.T) {
 	repo := getRepository()
 	url := domain.NewURL("https://github.com")
-	if err := repo.Save(url); err != domain.ErrURLAlreadyExists {
+	if err := repo.Save(context.TODO(), url); err != domain.ErrURLAlreadyExists {
 		t.Errorf("Expected %v, got %v", domain.ErrURLAlreadyExists, err)
 	}
 }
@@ -49,12 +50,12 @@ func TestSaveAlredyExist(t *testing.T) {
 func TestFind(t *testing.T) {
 	repo := getRepository()
 	url := domain.NewURL("https://github.com")
-	err := repo.Save(url)
+	err := repo.Save(context.TODO(), url)
 	if err != nil && err != domain.ErrURLAlreadyExists {
 		t.Errorf("Expected %v, got %v", nil, err)
 	}
 	repo = getRepository()
-	if findURL, err := repo.Find(url.ShortURL); err != nil {
+	if findURL, err := repo.Find(context.TODO(), url.ShortURL); err != nil {
 		t.Errorf("Expected %v, got %v", nil, err)
 	} else if findURL.LongURL != url.LongURL {
 		t.Errorf("Expected %s, got %s", url.LongURL, findURL.LongURL)
@@ -63,7 +64,7 @@ func TestFind(t *testing.T) {
 
 func TestFindNotExist(t *testing.T) {
 	repo := getRepository()
-	if _, err := repo.Find("someNotExistShortURL"); err != domain.ErrURLNotFound {
+	if _, err := repo.Find(context.TODO(), "someNotExistShortURL"); err != domain.ErrURLNotFound {
 		t.Errorf("Expected %v, got %v", domain.ErrURLNotFound, err)
 	}
 }
@@ -71,9 +72,9 @@ func TestFindNotExist(t *testing.T) {
 func TestIndempotencySave(t *testing.T) {
 	repo := getRepository()
 	url := domain.NewURL("https://github.com")
-	_ = repo.Save(url)
+	_ = repo.Save(context.TODO(), url)
 	firstShortURL := &url.ShortURL
-	_ = repo.Save(url)
+	_ = repo.Save(context.TODO(), url)
 	secondShortURL := &url.ShortURL
 	if firstShortURL != secondShortURL {
 		t.Errorf("Expected firstSortURL=%v and secondShortURL=%v not equal", firstShortURL, secondShortURL)

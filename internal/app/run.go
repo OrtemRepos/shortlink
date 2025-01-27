@@ -1,6 +1,8 @@
 package app
 
 import (
+	"context"
+
 	"github.com/gin-gonic/gin"
 
 	"github.com/OrtemRepos/shortlink/internal/gzip"
@@ -27,7 +29,7 @@ func Run(cfg *configs.Config) {
 	}()
 	var repository ports.URLRepositoryPort
 	if cfg.UseDataBase() {
-		repository = adapters.NewPostgreRepository(cfg)
+		repository = adapters.NewPostgreRepository(context.TODO(), cfg)
 	} else {
 		repository, err = adapters.NewInMemoryURLRepository(cfg.Repository.SavePath)
 		if err != nil {

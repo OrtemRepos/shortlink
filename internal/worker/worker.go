@@ -310,12 +310,21 @@ func (wp *IWorkerPool) Error(ctx context.Context) error {
 	return err
 }
 
-// Returns new WorkerPool
-// poolMetrics must be unique per pool
-// workersMetricsFabric must return unique metrics per worker
+func NewPoolMetrics() poolMetricsIncrement {
+	return &BasicPoolMetrics{}
+}
+
+func NewWorkerMetrics() metricsIncrement {
+	return &BasicMetrics{}
+}
+
+// Returns new WorkerPool.
+// poolMetrics must be unique per pool.
+// workersMetricsFabric must return unique metrics per worker.
 func NewWorkerPool(workerPoolName string,
 	workerCount, bufferSize, errMaximumAmount int,
-	poolMetrics poolMetricsIncrement, workersMetricsFabric NewMetricsFunc,
+	poolMetrics poolMetricsIncrement,
+	workersMetricsFabric func() metricsIncrement,
 ) WorkerPool {
 	if workerCount <= 0 {
 		panic("workerCount must be greater than 0")

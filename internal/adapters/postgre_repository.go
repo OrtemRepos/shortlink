@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
@@ -18,30 +17,30 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-var Log = logger.GetLogger()
-
 type PostgreRepository struct {
 	Database *sqlx.DB
+	log      *zap.Logger
 }
 
 const schema = `
 CREATE TABLE IF NOT EXISTS urls (
 	id SERIAL PRIMARY KEY,
+	link_id  UUID NOT NULL UNIQUE,
 	long_url TEXT NOT NULL UNIQUE,
 	short_url TEXT NOT NULL UNIQUE
+	is_deleted BOOLEAN DEFAULT FALSE
 );`
 
-func NewPostgreRepository(cfg *configs.Config) *PostgreRepository {
+func NewPostgreRepository(ctx context.Context, cfg *configs.Config) *PostgreRepository {
 	db := common.GetConnection(cfg)
-
-	ctx, cancel := createContextWithTimeout()
-	defer cancel()
+	log := logger.GetLogger()
 	if err := db.PingContext(ctx); err != nil {
-		Log.Panic("PostgreRepository: failed to ping database", zap.Error(err))
+		log.Panic("PostgreRepository: failed to ping database", zap.Error(err))
 	}
-	checkExistsTable(db)
+	checkExistsTable(ctx, db)
 	return &PostgreRepository{
 		Database: db,
+		log:      log,
 	}
 }
 
@@ -49,37 +48,28 @@ func (p *PostgreRepository) Close() error {
 	return p.Database.Close()
 }
 
-func (p *PostgreRepository) Ping() error {
-	ctx, cancel := createContextWithTimeout()
-	defer cancel()
+func (p *PostgreRepository) Ping(ctx context.Context) error {
 	return p.Database.PingContext(ctx)
 }
 
-func checkExistsTable(db *sqlx.DB) {
-	ctx, cancel := createContextWithTimeout()
-	defer cancel()
+func checkExistsTable(ctx context.Context, db *sqlx.DB) {
 	db.MustExecContext(ctx, schema)
 
 	db.MustExecContext(ctx, "CREATE INDEX IF NOT EXISTS idx_short_url ON urls (short_url);")
 }
 
-func (p *PostgreRepository) Find(shortURL string) (*domain.URL, error) {
+func (p *PostgreRepository) Find(ctx context.Context, shortURL string) (*domain.URL, error) {
 	var url domain.URL
-	ctx, cancel := createContextWithTimeout()
-	defer cancel()
 	err := p.Database.GetContext(ctx, &url, "SELECT id, long_url, short_url FROM urls WHERE short_url = $1", shortURL)
 	if err != nil {
-		Log.Error("Error in find url", zap.Any("URL", url), zap.Error(err))
+		p.log.Error("Error in find url", zap.Any("URL", url), zap.Error(err))
 		return nil, err
 	}
-	Log.Info("Find in storage", zap.Any("url", url))
+	p.log.Info("Find in storage", zap.Any("url", url))
 	return &url, nil
 }
 
-func (p *PostgreRepository) Save(url *domain.URL) error {
-	ctx, cancel := createContextWithTimeout()
-	defer cancel()
-
+func (p *PostgreRepository) Save(ctx context.Context, url *domain.URL) error {
 	tx := p.Database.MustBeginTx(ctx, nil)
 
 	defer func() { _ = tx.Rollback() }()
@@ -122,15 +112,10 @@ func (p *PostgreRepository) save(ctx context.Context, tx *sqlx.Tx, url *domain.U
 	}
 	url.ID = id
 	url.ShortURL = shortURL
-	if err != nil {
-		return fmt.Errorf("failed to save user link: %w", err)
-	}
 	return nil
 }
 
-func (p *PostgreRepository) BatchSave(urls []*domain.URL) error {
-	ctx, cancel := createContextWithTimeout()
-	defer cancel()
+func (p *PostgreRepository) BatchSave(ctx context.Context, urls []*domain.URL) error {
 	tx := p.Database.MustBeginTx(ctx, nil)
 
 	defer func() { _ = tx.Rollback() }()
@@ -145,7 +130,35 @@ func (p *PostgreRepository) BatchSave(urls []*domain.URL) error {
 	return tx.Commit()
 }
 
-func createContextWithTimeout() (context.Context, context.CancelFunc) {
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-	return ctx, cancel
+func (p *PostgreRepository) delete(ctx context.Context, tx *sqlx.Tx, userID, linkID string) error {
+	stmt, err := tx.PrepareContext(ctx, "UPDATE urls SET is_deleted = true WHERE id = $1 AND link_id = $2;")
+	if err != nil {
+		p.log.Error("failed to prepare delete statement", zap.Error(err))
+		return fmt.Errorf("failed to prepare delete statement: %w", err)
+	}
+	defer stmt.Close()
+	_, err = stmt.ExecContext(ctx, userID, linkID)
+	if err != nil {
+		p.log.Error("failed to delete URL", zap.Error(err))
+		return fmt.Errorf("failed to delete URL: %w", err)
+	}
+	return nil
+}
+
+func (p *PostgreRepository) BatchDelete(ctx context.Context, ids map[string][]string) error {
+	tx := p.Database.MustBeginTx(ctx, nil)
+	errs := make([]error, 0, len(ids))
+	defer func() { _ = tx.Rollback() }()
+	for userID, linkIDs := range ids {
+		for _, linkID := range linkIDs {
+			err := p.delete(ctx, tx, userID, linkID)
+			if err != nil {
+				p.log.Error("failed to delete URL", zap.Error(err), zap.String("user_id", userID), zap.String("link_id", linkID))
+				errs = append(errs, fmt.Errorf("unable to delete URL: %w", err))
+			}
+		}
+	}
+	errs = append(errs, tx.Commit())
+	err := errors.Join(errs...)
+	return err
 }

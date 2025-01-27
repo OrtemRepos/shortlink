@@ -9,11 +9,13 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/OrtemRepos/shortlink/configs"
+	"github.com/OrtemRepos/shortlink/internal/logger"
 	"github.com/OrtemRepos/shortlink/internal/ports"
 )
 
 type ProviderJWT struct {
 	tokenExp  time.Duration
+	log       *zap.Logger
 	secretKey string
 }
 
@@ -21,6 +23,7 @@ func NewProviderJWT(cfg *configs.Config) *ProviderJWT {
 	return &ProviderJWT{
 		tokenExp:  time.Duration(cfg.Auth.TokenExp),
 		secretKey: cfg.Auth.SecretKey,
+		log:       logger.GetLogger(),
 	}
 }
 
@@ -36,10 +39,9 @@ func (pj *ProviderJWT) BuildJWTString(id string) (string, error) {
 			UserID: id,
 		},
 	)
-
 	tokenString, err := token.SignedString([]byte(pj.secretKey))
 	if err != nil {
-		Log.Error("Failed to sign token", zap.Error(err))
+		pj.log.Error("Failed to sign token", zap.Error(err))
 		return "", err
 	}
 

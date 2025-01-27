@@ -15,6 +15,7 @@ type URL struct {
 	ID       int    `json:"-" db:"id"`
 	LongURL  string `json:"longURL" db:"long_url"`
 	ShortURL string `json:"shortURL" db:"short_url"`
+	IsDelete bool   `json:"-" db:"is_delete"`
 }
 
 func (u *URL) GenerateShortURL() string {

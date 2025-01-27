@@ -1,6 +1,7 @@
 package adapters
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,27 +16,44 @@ import (
 	"github.com/OrtemRepos/shortlink/internal/auth"
 	"github.com/OrtemRepos/shortlink/internal/common"
 	"github.com/OrtemRepos/shortlink/internal/domain"
+	"github.com/OrtemRepos/shortlink/internal/logger"
 	"github.com/OrtemRepos/shortlink/internal/middleware"
 	"github.com/OrtemRepos/shortlink/internal/ports"
+	"github.com/OrtemRepos/shortlink/internal/task"
+	"github.com/OrtemRepos/shortlink/internal/worker"
 
 	"github.com/gin-gonic/gin"
 )
 
 type RestAPI struct {
 	cfg           *configs.Config
+	workerPool    worker.WorkerPool
 	tokenProvider ports.PortJWT
 	repo          ports.URLRepositoryPort
+	deleteChan    chan map[string][]string
+	log           *zap.Logger
 	*gin.Engine
 }
 
 func NewRestAPI(repo ports.URLRepositoryPort,
 	engine *gin.Engine, cfg *configs.Config,
 ) *RestAPI {
+	log := logger.GetLogger()
 	tokenProvider := NewProviderJWT(cfg)
+	workerPool := worker.NewWorkerPool(
+		"deleteWorker",
+		cfg.Worker.WorkersCount,
+		cfg.Worker.BufferSize,
+		cfg.Worker.ErrMaximumAmount,
+		worker.NewPoolMetrics(),
+		worker.NewWorkerMetrics,
+	)
 	return &RestAPI{
 		repo:          repo,
 		tokenProvider: tokenProvider,
+		workerPool:    workerPool,
 		Engine:        engine,
+		log:           log,
 		cfg:           cfg,
 	}
 }
@@ -43,6 +61,21 @@ func NewRestAPI(repo ports.URLRepositoryPort,
 const cookieExpTime = 3 * time.Hour
 
 func (r *RestAPI) Serve() {
+	r.workerPool.Start(context.TODO())
+
+	timeout := time.Second
+
+	deleteTask := task.NewBatcherDeleteTask(
+		r.deleteChan,
+		r.repo,
+		r.cfg.Worker.BufferSize,
+		timeout,
+	)
+
+	for i := 0; i < r.cfg.Worker.WorkersCount; i++ {
+		_ = r.workerPool.Submit(context.TODO(), deleteTask)
+	}
+
 	saveMiddleware := middleware.SaveUserLinkMiddleware(
 		common.GetConnection(r.cfg),
 	)
@@ -76,7 +109,7 @@ func (r *RestAPI) Serve() {
 
 func (r *RestAPI) GetLongURL(c *gin.Context) {
 	shortURL := c.Param("shortURL")
-	url, err := r.repo.Find(shortURL)
+	url, err := r.repo.Find(context.TODO(), shortURL)
 	if err == domain.ErrURLNotFound {
 		c.String(http.StatusNotFound, err.Error())
 		return
@@ -88,7 +121,7 @@ func (r *RestAPI) GetLongURL(c *gin.Context) {
 }
 
 func (r *RestAPI) Ping(c *gin.Context) {
-	err := r.repo.Ping()
+	err := r.repo.Ping(context.TODO())
 	if err != nil {
 		c.String(http.StatusInternalServerError, err.Error())
 	}
@@ -116,7 +149,7 @@ func (r *RestAPI) JSONShortURL(c *gin.Context) {
 		)
 		return
 	}
-	if err := r.repo.Save(&url); errors.Is(err, domain.ErrURLAlreadyExists) {
+	if err := r.repo.Save(context.TODO(), &url); errors.Is(err, domain.ErrURLAlreadyExists) {
 		status = http.StatusConflict
 	} else if err != nil {
 		_ = c.AbortWithError(http.StatusInternalServerError, err)
@@ -152,7 +185,7 @@ func (r *RestAPI) BatchShortURL(c *gin.Context) {
 		urlsToSave = append(urlsToSave, url)
 	}
 	c.Set("urls", urlsToSave)
-	if err := r.repo.BatchSave(urlsToSave); err != nil {
+	if err := r.repo.BatchSave(context.TODO(), urlsToSave); err != nil {
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
@@ -175,12 +208,12 @@ func (r *RestAPI) Auth(c *gin.Context) {
 			c.AbortWithStatusJSON(http.StatusOK, gin.H{"UserID": claims.UserID, "msg": "You alredy login!"})
 			return
 		}
-		Log.Info("Token err")
+		r.log.Info("Token err")
 	}
 	userID := uuid.NewString()
 	tokenString, err = r.tokenProvider.BuildJWTString(userID)
 	if err != nil {
-		Log.Info("LoginMeddleware error", zap.Error(err))
+		r.log.Info("LoginMeddleware error", zap.Error(err))
 		_ = c.AbortWithError(http.StatusInternalServerError, err)
 		return
 	}
@@ -205,7 +238,7 @@ func (r *RestAPI) GetAllUserLinks(c *gin.Context) {
     `
 	rows, err := db.Queryx(query, userID)
 	if err != nil {
-		Log.Error("GetAllUserLinks error", zap.Error(err))
+		r.log.Error("GetAllUserLinks error", zap.Error(err))
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve user links"})
 		return
 	}
@@ -216,7 +249,7 @@ func (r *RestAPI) GetAllUserLinks(c *gin.Context) {
 		err := rows.StructScan(&url)
 		url.ShortURL = r.cfg.Server.BaseAddress + url.ShortURL
 		if err != nil {
-			Log.Error("GetAllUserLinks error", zap.Error(err))
+			r.log.Error("GetAllUserLinks error", zap.Error(err))
 			continue
 		}
 		urls = append(urls, url)
@@ -228,4 +261,19 @@ func (r *RestAPI) GetAllUserLinks(c *gin.Context) {
 	result["urls"] = urls
 	c.Set("result", result)
 	c.JSON(http.StatusOK, result)
+}
+
+func (r *RestAPI) DeleteLink(c *gin.Context) {
+	userID := c.GetString("UserID")
+	linkIDs := c.QueryArray("linkIDs")
+	request := map[string][]string{
+		userID: linkIDs,
+	}
+
+	select {
+	case r.deleteChan <- request:
+		c.JSON(http.StatusAccepted, gin.H{"message": "Link deletion initiated"})
+	default:
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "Too many requests, please try again later"})
+	}
 }

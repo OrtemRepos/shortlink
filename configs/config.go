@@ -66,7 +66,7 @@ func processArgs(argsToParse []string) (*argsCommandLine, map[string]bool, error
 	f := flag.NewFlagSet("shortlink", flag.ContinueOnError)
 
 	f.StringVar(&a.ConfigPath, "c",
-		"/home/work/go/src/github.com/OrtemRepos/shortlink/configs/config.yml",
+		"/home/ortem917/go/src/github.com/OrtemRepos/shortlink/configs/config.yml",
 		"Path to configuration file")
 	f.BoolVar(&a.InMemory, "im", false, "In-memory mode")
 	f.StringVar(&a.SavePath, "s", "", "Path to save data")
@@ -112,12 +112,12 @@ func GetConfig(argsToParse []string) (*Config, error) {
 		return nil, fmt.Errorf("config read error: %w", err)
 	}
 
-	if err := overrideConfig(cfg, args, setFlags); err != nil {
-		return nil, fmt.Errorf("config override error: %w", err)
-	}
-
 	if err := cleanenv.ReadEnv(cfg); err != nil {
 		return nil, fmt.Errorf("env read error: %w", err)
+	}
+
+	if err := overrideConfig(cfg, args, setFlags); err != nil {
+		return nil, fmt.Errorf("config override error: %w", err)
 	}
 
 	logConfig(cfg)
@@ -206,7 +206,7 @@ func setFieldValue(field, value reflect.Value) error {
 
 	val := value.Interface()
 
-	switch field.Kind() {
+	switch field.Kind() { //nolint:exhaustive
 	case reflect.String:
 		field.SetString(fmt.Sprint(val))
 		return nil
@@ -228,9 +228,9 @@ func setFieldValue(field, value reflect.Value) error {
 		}
 		field.SetBool(boolVal)
 		return nil
+	default:
+		return fmt.Errorf("unsupported field type: %s", field.Type())
 	}
-
-	return fmt.Errorf("unsupported field type: %s", field.Type())
 }
 
 func logConfig(cfg *Config) {

@@ -14,8 +14,8 @@ func getURL() *domain.URL {
 func TestNewURL(t *testing.T) {
 	url := getURL()
 
-	if url.LongURL != "https://github.com" {
-		t.Errorf("Expected %s, got %s", "https://github.com", url.LongURL)
+	if url.OriginalURL != "https://github.com" {
+		t.Errorf("Expected %s, got %s", "https://github.com", url.OriginalURL)
 	}
 
 	if url.ShortURL != "" {

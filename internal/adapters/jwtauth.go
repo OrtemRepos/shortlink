@@ -21,7 +21,7 @@ type ProviderJWT struct {
 
 func NewProviderJWT(cfg *configs.Config) *ProviderJWT {
 	return &ProviderJWT{
-		tokenExp:  time.Duration(cfg.Auth.TokenExp),
+		tokenExp:  time.Duration(cfg.Auth.TokenExp) * time.Second,
 		secretKey: cfg.Auth.SecretKey,
 		log:       logger.GetLogger(),
 	}

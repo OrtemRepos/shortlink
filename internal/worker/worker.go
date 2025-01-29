@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -56,6 +57,7 @@ type Metrics interface {
 	TasksStarted() int
 	TasksCompleted() int
 	TasksFailed() int
+	MarshalJSON() ([]byte, error)
 }
 
 type metricsIncrement interface {
@@ -63,6 +65,7 @@ type metricsIncrement interface {
 	incrementStarted()
 	incrementCompleted()
 	incrementFailed()
+	MarshalJSON() ([]byte, error)
 }
 
 type NewMetricsFunc func() metricsIncrement
@@ -118,6 +121,18 @@ func (m *BasicMetrics) incrementFailed() {
 	m.failed.Add(1)
 }
 
+func (m *BasicMetrics) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		TasksStarted   int `json:"tasks_started"`
+		TasksCompleted int `json:"tasks_completed"`
+		TasksFailed    int `json:"tasks_failed"`
+	}{
+		TasksStarted:   m.TasksStarted(),
+		TasksCompleted: m.TasksCompleted(),
+		TasksFailed:    m.TasksFailed(),
+	})
+}
+
 type BasicPoolMetrics struct {
 	enqueued atomic.Int64
 }
@@ -125,6 +140,14 @@ type BasicPoolMetrics struct {
 func (m *BasicPoolMetrics) TasksEnqueued() int { return int(m.enqueued.Load()) }
 
 func (m *BasicPoolMetrics) incrementEnqueued() { m.enqueued.Add(1) }
+
+func (m *BasicPoolMetrics) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		TasksEnqueued int `json:"tasks_enqueued"`
+	}{
+		TasksEnqueued: m.TasksEnqueued(),
+	})
+}
 
 func (w *IWorker) start(ctx context.Context) {
 	ctx, cancel := context.WithCancel(ctx)

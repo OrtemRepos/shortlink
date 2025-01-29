@@ -14,6 +14,6 @@ auth:
   tokenExp: 10800
   secretKey: "mySecretKey"
 worker:
-  workerCount: 2
+  workersCount: 2
   bufferSize: 100
   errMaximumAmount: 100

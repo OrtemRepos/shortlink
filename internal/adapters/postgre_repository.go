@@ -2,7 +2,6 @@ package adapters
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 
@@ -24,11 +23,11 @@ type PostgreRepository struct {
 
 const schema = `
 CREATE TABLE IF NOT EXISTS urls (
-	id SERIAL PRIMARY KEY,
-	link_id  UUID NOT NULL UNIQUE,
-	long_url TEXT NOT NULL UNIQUE,
-	short_url TEXT NOT NULL UNIQUE
-	is_deleted BOOLEAN DEFAULT FALSE
+	user_id      UUID NOT NULL,
+	short_url    TEXT NOT NULL UNIQUE,
+	original_url TEXT NOT NULL,
+	is_deleted   BOOLEAN DEFAULT FALSE,
+	PRIMARY KEY (user_id, original_url)
 );`
 
 func NewPostgreRepository(ctx context.Context, cfg *configs.Config) *PostgreRepository {
@@ -56,11 +55,15 @@ func checkExistsTable(ctx context.Context, db *sqlx.DB) {
 	db.MustExecContext(ctx, schema)
 
 	db.MustExecContext(ctx, "CREATE INDEX IF NOT EXISTS idx_short_url ON urls (short_url);")
+	db.MustExecContext(ctx, "CREATE INDEX IF NOT EXISTS idx_user_id ON urls (user_id);")
 }
 
 func (p *PostgreRepository) Find(ctx context.Context, shortURL string) (*domain.URL, error) {
 	var url domain.URL
-	err := p.Database.GetContext(ctx, &url, "SELECT id, long_url, short_url FROM urls WHERE short_url = $1", shortURL)
+	err := p.Database.GetContext(ctx, &url,
+		"SELECT user_id, original_url, short_url, is_deleted FROM urls WHERE short_url = $1",
+		shortURL,
+	)
 	if err != nil {
 		p.log.Error("Error in find url", zap.Any("URL", url), zap.Error(err))
 		return nil, err
@@ -76,7 +79,8 @@ func (p *PostgreRepository) Save(ctx context.Context, url *domain.URL) error {
 
 	err := p.save(ctx, tx, url)
 	if errors.Is(err, domain.ErrURLAlreadyExists) {
-		return err
+		errCommit := tx.Commit()
+		return errors.Join(err, errCommit)
 	} else if err != nil {
 		return fmt.Errorf("unable to save URL: %w", err)
 	}
@@ -87,31 +91,35 @@ func (p *PostgreRepository) Save(ctx context.Context, url *domain.URL) error {
 
 	return nil
 }
+
 func (p *PostgreRepository) save(ctx context.Context, tx *sqlx.Tx, url *domain.URL) error {
 	url.GenerateShortURL()
+
 	stmt, err := tx.PreparexContext(
 		ctx,
-		"INSERT INTO urls (long_url, short_url) VALUES ($1, $2) ON CONFLICT (long_url) DO NOTHING RETURNING id, short_url;",
+		`INSERT INTO urls (user_id, short_url, original_url)
+	 	 VALUES ($1, $2, $3)
+		 ON CONFLICT (user_id, original_url) 
+		 DO UPDATE SET is_deleted = FALSE
+		 RETURNING user_id, short_url, original_url, is_deleted;`,
 	)
 	if err != nil {
 		return fmt.Errorf("unable to prepare statement: %w", err)
 	}
 	defer stmt.Close()
-	var id int
-	var shortURL string
-	err = stmt.QueryRowxContext(ctx, url.LongURL, url.ShortURL).Scan(&id, &shortURL)
+
+	existingURL := &domain.URL{}
+	err = stmt.QueryRowxContext(ctx, url.UUID, url.ShortURL, url.OriginalURL).StructScan(existingURL)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			err = tx.GetContext(ctx, url, "SELECT id, long_url, short_url FROM urls WHERE long_url = $1", url.LongURL)
-			if err != nil {
-				return fmt.Errorf("failed to get existing URL: %w", err)
-			}
-			return domain.ErrURLAlreadyExists
-		}
 		return fmt.Errorf("query row error: %w", err)
 	}
-	url.ID = id
-	url.ShortURL = shortURL
+
+	if existingURL.ShortURL != url.ShortURL {
+		url.ShortURL = existingURL.ShortURL
+		url.DeletedFlag = existingURL.DeletedFlag
+		return domain.ErrURLAlreadyExists
+	}
+
 	return nil
 }
 
@@ -130,14 +138,14 @@ func (p *PostgreRepository) BatchSave(ctx context.Context, urls []*domain.URL) e
 	return tx.Commit()
 }
 
-func (p *PostgreRepository) delete(ctx context.Context, tx *sqlx.Tx, userID, linkID string) error {
-	stmt, err := tx.PrepareContext(ctx, "UPDATE urls SET is_deleted = true WHERE id = $1 AND link_id = $2;")
+func (p *PostgreRepository) delete(ctx context.Context, tx *sqlx.Tx, userID, shortURL string) error {
+	stmt, err := tx.PrepareContext(ctx, "UPDATE urls SET is_deleted = true WHERE user_id = $1 AND short_url = $2;")
 	if err != nil {
 		p.log.Error("failed to prepare delete statement", zap.Error(err))
 		return fmt.Errorf("failed to prepare delete statement: %w", err)
 	}
 	defer stmt.Close()
-	_, err = stmt.ExecContext(ctx, userID, linkID)
+	_, err = stmt.ExecContext(ctx, userID, shortURL)
 	if err != nil {
 		p.log.Error("failed to delete URL", zap.Error(err))
 		return fmt.Errorf("failed to delete URL: %w", err)

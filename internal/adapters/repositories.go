@@ -45,23 +45,23 @@ func (r *InMemoryURLRepository) Ping(ctx context.Context) error {
 func (r *InMemoryURLRepository) Save(ctx context.Context, url *domain.URL) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if shortURL, ok := r.longURLExists(url.LongURL); ok {
+	if shortURL, ok := r.longURLExists(url.OriginalURL); ok {
 		url.ShortURL = shortURL
 		return domain.ErrURLAlreadyExists
 	}
 	url.GenerateShortURL()
-	r.m[url.ShortURL] = url.LongURL
+	r.m[url.ShortURL] = url.OriginalURL
 	return r.saveToFile()
 }
 func (r *InMemoryURLRepository) BatchSave(ctx context.Context, urls []*domain.URL) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, url := range urls {
-		if shortURL, ok := r.longURLExists(url.LongURL); ok {
+		if shortURL, ok := r.longURLExists(url.OriginalURL); ok {
 			url.ShortURL = shortURL
 		} else {
 			url.GenerateShortURL()
-			r.m[url.ShortURL] = url.LongURL
+			r.m[url.ShortURL] = url.OriginalURL
 		}
 	}
 	return r.saveToFile()
@@ -78,7 +78,7 @@ func (r *InMemoryURLRepository) Find(ctx context.Context, shortURL string) (*dom
 	if !ok {
 		return nil, domain.ErrURLNotFound
 	}
-	return &domain.URL{LongURL: longURL, ShortURL: shortURL}, nil
+	return &domain.URL{OriginalURL: longURL, ShortURL: shortURL}, nil
 }
 
 func (r *InMemoryURLRepository) longURLExists(longURL string) (string, bool) {

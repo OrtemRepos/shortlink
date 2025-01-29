@@ -40,7 +40,7 @@ func NewBatcherDeleteTask(
 		buffer:     make(map[string][]string, bufferSize),
 		inputChan:  inputChan,
 		timeout:    timeout,
-		errSlice:   make([]error, 0, 100),
+		errSlice:   make([]error, 0, bufferSize),
 		log:        logger.GetLogger(),
 	}
 }
@@ -71,6 +71,7 @@ func (b *BatcherDeleteTask) run(ctx context.Context) {
 func (b *BatcherDeleteTask) addToBuffer(ids map[string][]string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.log.Info("BatcherDeleteTask: adding ids to buffer", zap.Any("ids", ids))
 	for key, value := range ids {
 		b.buffer[key] = append(b.buffer[key], value...)
 	}
@@ -84,16 +85,20 @@ func (b *BatcherDeleteTask) flush(ctx context.Context) {
 	}
 	idsToDelete := b.buffer
 	b.buffer = make(map[string][]string, b.bufferSize)
+	b.log.Info("BatcherDeleteTask: flushing buffer", zap.Any("ids", idsToDelete))
 	go func(ctx context.Context, idsToDelete map[string][]string) {
+		b.log.Info("BatcherDeleteTask: deleting ids", zap.Any("ids", idsToDelete))
 		err := b.storage.BatchDelete(ctx, idsToDelete)
 		if err != nil {
 			b.reportError(err)
 			b.log.Error("BatcherDeleteTask: failed to delete ids", zap.Error(err), zap.Any("ids", idsToDelete))
 		}
+		b.log.Info("BatcherDeleteTask: deleted ids", zap.Any("ids", idsToDelete))
 	}(ctx, idsToDelete)
 }
 
 func (b *BatcherDeleteTask) Execute(ctx context.Context) error {
+	b.log.Info("BatcherDeleteTask: starting")
 	errBuffer := 100
 	b.errSlice = make([]error, 0, errBuffer)
 	go b.run(ctx)

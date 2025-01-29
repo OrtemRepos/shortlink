@@ -34,8 +34,8 @@ func TestSave(t *testing.T) {
 	repo = getRepository()
 	if findURL, err := repo.Find(context.TODO(), url.ShortURL); err != nil {
 		t.Errorf("Expected %v, got %v", nil, err)
-	} else if findURL.LongURL != url.LongURL {
-		t.Errorf("Expected %s, got %s", url.LongURL, findURL.LongURL)
+	} else if findURL.OriginalURL != url.OriginalURL {
+		t.Errorf("Expected %s, got %s", url.OriginalURL, findURL.OriginalURL)
 	}
 }
 
@@ -57,8 +57,8 @@ func TestFind(t *testing.T) {
 	repo = getRepository()
 	if findURL, err := repo.Find(context.TODO(), url.ShortURL); err != nil {
 		t.Errorf("Expected %v, got %v", nil, err)
-	} else if findURL.LongURL != url.LongURL {
-		t.Errorf("Expected %s, got %s", url.LongURL, findURL.LongURL)
+	} else if findURL.OriginalURL != url.OriginalURL {
+		t.Errorf("Expected %s, got %s", url.OriginalURL, findURL.OriginalURL)
 	}
 }
 

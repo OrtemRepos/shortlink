@@ -12,9 +12,10 @@ import (
 const maxInt64 = 1<<63 - 1
 
 type URL struct {
-	ID       int    `json:"-" db:"id"`
-	LongURL  string `json:"longURL" db:"long_url"`
-	ShortURL string `json:"shortURL" db:"short_url"`
+	UUID        string `json:"-" db:"user_id"`
+	ShortURL    string `json:"shortURL" db:"short_url"`
+	OriginalURL string `json:"longURL" db:"original_url"`
+	DeletedFlag bool   `json:"-" db:"is_deleted"`
 }
 
 func (u *URL) GenerateShortURL() string {
@@ -24,14 +25,14 @@ func (u *URL) GenerateShortURL() string {
 	}
 
 	randomStr := strconv.FormatInt(randomInt.Int64(), 10)
-	hash := sha256.Sum256([]byte(u.LongURL + randomStr))
+	hash := sha256.Sum256([]byte(u.OriginalURL + randomStr))
 	u.ShortURL = hex.EncodeToString(hash[:])[:8]
 	return u.ShortURL
 }
 
 func NewURL(longURL string) *URL {
 	return &URL{
-		LongURL:  longURL,
-		ShortURL: "",
+		OriginalURL: longURL,
+		ShortURL:    "",
 	}
 }

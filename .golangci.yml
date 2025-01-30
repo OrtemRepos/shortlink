@@ -21,6 +21,9 @@ linters-settings:
     check-exported: false
   nakedret:
     max-func-lines: 30
+  funlen:
+    lines: 100
+    statements: 50
   prealloc:
     simple: true
     range-loops: true
